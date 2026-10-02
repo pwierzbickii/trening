@@ -31,33 +31,43 @@
     background: var(--card2); color: var(--text); cursor: pointer; min-height: 48px;
   }
   button:active { transform: scale(0.97); }
+  button:disabled { opacity: .35; }
   .primary { background: var(--accent); color: #052e16; font-weight: 700; }
-  .danger { background: var(--danger); color: #fff; }
   .ghost { background: transparent; color: var(--muted); }
-  .block { width: 100%; }
   .card { background: var(--card); border-radius: var(--radius); padding: 14px; margin-bottom: 14px; }
   .card h2 { margin: 0 0 10px; font-size: 18px; display: flex; gap: 8px; align-items: baseline; }
   .card h2 .ord { color: var(--muted); font-weight: 400; }
   .muted { color: var(--muted); }
+  .text-input {
+    width: 100%; font: inherit; font-size: 18px; padding: 12px 14px; min-height: 48px;
+    background: var(--card2); color: var(--text); border: 0; border-radius: var(--radius); outline: none;
+  }
+  .text-input::placeholder, .num input::placeholder { color: var(--muted); font-weight: 400; }
+  .field-label { display: block; font-size: 14px; color: var(--muted); margin: 0 0 6px 4px; }
   .sets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
   .set {
-    display: inline-flex; align-items: center; gap: 6px; background: var(--card2);
+    display: inline-flex; align-items: center; gap: 4px; background: var(--card2);
     border-radius: 999px; padding: 6px 6px 6px 12px; font-size: 15px;
   }
   .set b { font-size: 17px; }
   .set button { min-height: 32px; height: 32px; width: 32px; padding: 0; border-radius: 50%;
     background: transparent; color: var(--muted); font-size: 18px; }
   .add-row { display: flex; gap: 8px; align-items: stretch; }
-  .stepper { display: flex; flex: 1; background: var(--card2); border-radius: var(--radius); overflow: hidden; }
-  .stepper button { width: 52px; background: transparent; font-size: 24px; border-radius: 0; padding: 0; }
-  .stepper input {
-    flex: 1; min-width: 0; text-align: center; font: inherit; font-size: 22px; font-weight: 700;
-    background: transparent; border: 0; color: var(--text); outline: none;
+  .num { flex: 1; min-width: 0; position: relative; }
+  .num input {
+    width: 100%; height: 100%; min-height: 52px; text-align: center; font: inherit; font-size: 22px; font-weight: 700;
+    background: var(--card2); border: 0; border-radius: var(--radius); color: var(--text); outline: none;
+    padding: 0 8px;
   }
   .add-row .primary { flex: 0 0 auto; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row .text-input { flex: 1; min-width: 0; }
   .list-item { display: flex; align-items: center; gap: 10px; }
-  .list-item .info { flex: 1; min-width: 0; }
+  .list-item .info { flex: 1; min-width: 0; cursor: pointer; }
   .list-item .info div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ex-item { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 14px; margin-bottom: 8px; }
+  .ex-item .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .ex-item button { min-height: 40px; width: 40px; padding: 0; background: transparent; color: var(--muted); font-size: 18px; }
   .bottom-bar {
     position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg);
     border-top: 1px solid var(--card2); display: flex; gap: 10px;
@@ -100,15 +110,26 @@
   const fileInput = document.getElementById('fileInput');
   const toastEl = document.getElementById('toast');
 
-  // state: { trainings: [{ id, createdAt, exercises: [{ name, sets: [number] }] }], currentId }
+  // state: {
+  //   trainings: [{ id, name, createdAt, exercises: [{ name, sets: [{ rep, weight }] }] }],
+  //   currentId,
+  //   draftList: [string]  // kreator listy ćwiczeń
+  // }
   let state = load();
 
   function load() {
-    try {
-      const s = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (s && Array.isArray(s.trainings)) return s;
-    } catch (e) {}
-    return { trainings: [], currentId: null };
+    let s = null;
+    try { s = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) {}
+    if (!s || !Array.isArray(s.trainings)) s = { trainings: [], currentId: null };
+    if (!Array.isArray(s.draftList)) s.draftList = [];
+    // migracja ze starszej wersji (serie jako same liczby, brak nazwy)
+    for (const t of s.trainings) {
+      if (typeof t.name !== 'string') t.name = '';
+      for (const ex of t.exercises) {
+        ex.sets = ex.sets.map(x => typeof x === 'number' ? { rep: x, weight: 0 } : x);
+      }
+    }
+    return s;
   }
 
   function save() {
@@ -122,8 +143,17 @@
   }
 
   function formatTime(iso) {
-    const d = new Date(iso);
-    return d.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+    return new Date(iso).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // puste / niepoprawne -> 0
+  function toNum(v) {
+    const n = parseFloat(String(v).replace(',', '.'));
+    return isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function safeFileName(s) {
+    return s.trim().replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_');
   }
 
   function toast(msg) {
@@ -138,6 +168,8 @@
     for (const [k, v] of Object.entries(attrs)) {
       if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
       else if (k === 'class') e.className = v;
+      else if (k === 'value') e.value = v;
+      else if (k === 'disabled') e.disabled = v;
       else e.setAttribute(k, v);
     }
     for (const c of children) {
@@ -145,6 +177,16 @@
       e.append(c instanceof Node ? c : document.createTextNode(c));
     }
     return e;
+  }
+
+  function downloadJson(data, fileName) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: fileName });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function current() {
@@ -169,6 +211,7 @@
       }
       const training = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        name: '',
         createdAt: new Date().toISOString(),
         exercises: data.map(name => ({ name: name.trim(), sets: [] }))
       };
@@ -186,23 +229,20 @@
     fileInput.click();
   }
 
-  // ---------- Eksport ----------
+  // ---------- Eksport treningu ----------
   function exportTraining(t) {
+    const date = formatDate(t.createdAt);
     const out = {
-      date: formatDate(t.createdAt),
+      name: t.name,
+      date,
       exercises: t.exercises.map((ex, i) => ({
         order: i + 1,
         name: ex.name,
-        metrics: ex.sets.map((rep, j) => ({ set: j + 1, rep }))
+        metrics: ex.sets.map((s, j) => ({ set: j + 1, rep: s.rep, weight: s.weight }))
       }))
     };
-    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = el('a', { href: url, download: `trening-${out.date.replace(/\./g, '-')}.json` });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const namePart = safeFileName(t.name);
+    downloadJson(out, `trening-${date.replace(/\./g, '-')}${namePart ? '-' + namePart : ''}.json`);
   }
 
   // ---------- Widok: lista treningów ----------
@@ -216,7 +256,7 @@
     if (state.trainings.length === 0) {
       main.append(el('div', { class: 'empty' },
         el('p', {}, 'Brak treningów.'),
-        el('p', { class: 'muted' }, 'Kliknij „Nowy trening” i wybierz plik JSON z listą ćwiczeń, np. ["Przysiad", "Pompki"].')
+        el('p', { class: 'muted' }, 'Kliknij „Nowy trening” i wybierz plik JSON z listą ćwiczeń, np. ["Przysiad", "Pompki"]. Plik możesz przygotować w „Lista ćwiczeń”.')
       ));
     }
 
@@ -225,12 +265,13 @@
       const done = t.exercises.filter(ex => ex.sets.length).length;
       main.append(el('div', { class: 'card list-item' },
         el('div', { class: 'info', onclick: () => { state.currentId = t.id; save(); renderTraining(); } },
-          el('div', {}, el('b', {}, formatDate(t.createdAt)), ' ', el('span', { class: 'muted' }, formatTime(t.createdAt))),
+          el('div', {}, el('b', {}, t.name || 'Bez nazwy')),
+          el('div', { class: 'muted' }, `${formatDate(t.createdAt)} ${formatTime(t.createdAt)}`),
           el('div', { class: 'muted' }, `${done}/${t.exercises.length} ćwiczeń · ${totalSets} serii`)
         ),
         el('button', { onclick: () => exportTraining(t), 'aria-label': 'Eksportuj' }, '⬇'),
         el('button', { class: 'ghost', 'aria-label': 'Usuń', onclick: () => {
-          if (!confirm(`Usunąć trening z ${formatDate(t.createdAt)}?`)) return;
+          if (!confirm(`Usunąć trening „${t.name || 'Bez nazwy'}” z ${formatDate(t.createdAt)}?`)) return;
           state.trainings = state.trainings.filter(x => x.id !== t.id);
           save();
           renderHome();
@@ -239,7 +280,81 @@
     }
 
     bottomBar.innerHTML = '';
-    bottomBar.append(el('button', { class: 'primary', onclick: newTraining }, '+ Nowy trening'));
+    bottomBar.append(
+      el('button', { onclick: renderListEditor }, '📝 Lista ćwiczeń'),
+      el('button', { class: 'primary', onclick: newTraining }, '+ Nowy trening')
+    );
+  }
+
+  // ---------- Widok: kreator listy ćwiczeń ----------
+  function renderListEditor() {
+    titleEl.textContent = 'Lista ćwiczeń';
+    backBtn.classList.remove('hidden');
+    main.innerHTML = '';
+
+    const list = state.draftList;
+    const fileNameInput = el('input', { class: 'text-input', type: 'text', placeholder: 'cwiczenia', value: state.draftFileName || '' });
+    fileNameInput.addEventListener('input', () => { state.draftFileName = fileNameInput.value; save(); });
+
+    const nameInput = el('input', { class: 'text-input', type: 'text', placeholder: 'Nazwa ćwiczenia', enterkeyhint: 'done' });
+    const listBox = el('div');
+
+    function add() {
+      const v = nameInput.value.trim();
+      if (!v) { nameInput.focus(); return; }
+      list.push(v);
+      save();
+      nameInput.value = '';
+      nameInput.focus();
+      draw();
+    }
+    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+
+    function move(i, d) {
+      [list[i], list[i + d]] = [list[i + d], list[i]];
+      save();
+      draw();
+    }
+
+    function draw() {
+      listBox.innerHTML = '';
+      if (!list.length) listBox.append(el('p', { class: 'muted' }, 'Lista jest pusta. Dodaj pierwsze ćwiczenie.'));
+      list.forEach((name, i) => {
+        listBox.append(el('div', { class: 'card ex-item' },
+          el('span', { class: 'muted' }, `${i + 1}.`),
+          el('span', { class: 'name' }, name),
+          el('button', { 'aria-label': 'W górę', disabled: i === 0, onclick: () => move(i, -1) }, '↑'),
+          el('button', { 'aria-label': 'W dół', disabled: i === list.length - 1, onclick: () => move(i, 1) }, '↓'),
+          el('button', { 'aria-label': 'Usuń', onclick: () => { list.splice(i, 1); save(); draw(); } }, '×')
+        ));
+      });
+    }
+
+    main.append(
+      el('div', { class: 'card' },
+        el('label', { class: 'field-label' }, 'Nazwa pliku'),
+        fileNameInput,
+        el('label', { class: 'field-label', style: 'margin-top:12px' }, 'Dodaj ćwiczenie'),
+        el('div', { class: 'row' }, nameInput, el('button', { class: 'primary', onclick: add }, '+'))
+      ),
+      listBox
+    );
+    draw();
+
+    bottomBar.innerHTML = '';
+    bottomBar.append(
+      el('button', { onclick: () => {
+        if (!list.length || !confirm('Wyczyścić całą listę?')) return;
+        list.length = 0;
+        save();
+        draw();
+      } }, 'Wyczyść'),
+      el('button', { class: 'primary', onclick: () => {
+        if (!list.length) { toast('Lista jest pusta'); return; }
+        downloadJson(list, `${safeFileName(fileNameInput.value) || 'cwiczenia'}.json`);
+        toast('Zapisano plik z listą ćwiczeń');
+      } }, '💾 Zapisz plik')
+    );
   }
 
   // ---------- Widok: trening ----------
@@ -250,29 +365,38 @@
     backBtn.classList.remove('hidden');
     main.innerHTML = '';
 
-    t.exercises.forEach((ex, i) => main.append(exerciseCard(t, ex, i)));
+    const nameInput = el('input', { class: 'text-input', type: 'text', placeholder: 'Nazwa treningu (np. Push A)', value: t.name });
+    nameInput.addEventListener('input', () => { t.name = nameInput.value; save(); });
+    main.append(el('div', { class: 'card' }, el('label', { class: 'field-label' }, 'Nazwa treningu'), nameInput));
+
+    t.exercises.forEach((ex, i) => main.append(exerciseCard(ex, i)));
 
     bottomBar.innerHTML = '';
     bottomBar.append(
-      el('button', { onclick: () => exportTraining(t) }, '⬇ Eksportuj'),
-      el('button', { class: 'primary', onclick: newTraining }, '+ Nowy trening')
+      el('button', { class: 'primary', onclick: () => {
+        t.name = nameInput.value.trim();
+        save();
+        exportTraining(t);
+        toast('Trening zapisany');
+        renderHome();
+      } }, '💾 Zapisz trening')
     );
   }
 
-  function exerciseCard(t, ex, i) {
+  function exerciseCard(ex, i) {
     const card = el('div', { class: 'card' });
     const setsBox = el('div', { class: 'sets' });
-    const lastVal = ex.sets.length ? ex.sets[ex.sets.length - 1] : '';
-    const input = el('input', { type: 'number', inputmode: 'decimal', min: '0', step: 'any', placeholder: 'powt.', value: lastVal });
+    const repInput = el('input', { type: 'number', inputmode: 'decimal', min: '0', step: 'any', placeholder: 'powt.', enterkeyhint: 'next', 'aria-label': 'Powtórzenia' });
+    const kgInput = el('input', { type: 'number', inputmode: 'decimal', min: '0', step: 'any', placeholder: 'kg', enterkeyhint: 'done', 'aria-label': 'Ciężar w kg' });
 
     function drawSets() {
       setsBox.innerHTML = '';
       if (!ex.sets.length) setsBox.append(el('span', { class: 'muted' }, 'Brak serii'));
-      ex.sets.forEach((rep, j) => {
+      ex.sets.forEach((s, j) => {
         setsBox.append(el('span', { class: 'set' },
-          `S${j + 1}: `, el('b', {}, String(rep)),
+          `S${j + 1}: `, el('b', {}, String(s.rep)), ` × ${s.weight} kg`,
           el('button', { 'aria-label': 'Usuń serię', onclick: () => {
-            if (!confirm(`Usunąć serię ${j + 1} (${rep}) z „${ex.name}”?`)) return;
+            if (!confirm(`Usunąć serię ${j + 1} z „${ex.name}”?`)) return;
             ex.sets.splice(j, 1);
             save();
             drawSets();
@@ -281,31 +405,27 @@
       });
     }
 
-    function step(d) {
-      const v = parseFloat(input.value) || 0;
-      input.value = Math.max(0, v + d);
-    }
-
     function addSet() {
-      const v = parseFloat(String(input.value).replace(',', '.'));
-      if (!isFinite(v) || v <= 0) { toast('Podaj liczbę powtórzeń'); input.focus(); return; }
-      ex.sets.push(v);
+      const set = { rep: toNum(repInput.value), weight: toNum(kgInput.value) };
+      ex.sets.push(set);
       save();
+      repInput.value = '';
+      kgInput.value = '';
+      repInput.blur();
+      kgInput.blur();
       drawSets();
-      toast(`${ex.name}: seria ${ex.sets.length} = ${v}`);
+      toast(`${ex.name}: seria ${ex.sets.length} = ${set.rep} × ${set.weight} kg`);
     }
 
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') { input.blur(); addSet(); } });
+    repInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); kgInput.focus(); } });
+    kgInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addSet(); } });
 
     card.append(
       el('h2', {}, el('span', { class: 'ord' }, `${i + 1}.`), ex.name),
       setsBox,
       el('div', { class: 'add-row' },
-        el('div', { class: 'stepper' },
-          el('button', { onclick: () => step(-1), 'aria-label': 'Mniej' }, '−'),
-          input,
-          el('button', { onclick: () => step(1), 'aria-label': 'Więcej' }, '+')
-        ),
+        el('div', { class: 'num' }, repInput),
+        el('div', { class: 'num' }, kgInput),
         el('button', { class: 'primary', onclick: addSet }, '+ Seria')
       )
     );
