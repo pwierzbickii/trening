@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<title>Trening</title>
+<style>
+  :root {
+    --bg: #111827;
+    --card: #1f2937;
+    --card2: #374151;
+    --text: #f9fafb;
+    --muted: #9ca3af;
+    --accent: #22c55e;
+    --danger: #ef4444;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 17px; }
+  header {
+    position: sticky; top: 0; z-index: 10; background: var(--bg);
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+    display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--card2);
+  }
+  header h1 { font-size: 20px; margin: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  main { padding: 16px; padding-bottom: calc(100px + env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
+  button {
+    font: inherit; border: 0; border-radius: var(--radius); padding: 12px 16px;
+    background: var(--card2); color: var(--text); cursor: pointer; min-height: 48px;
+  }
+  button:active { transform: scale(0.97); }
+  .primary { background: var(--accent); color: #052e16; font-weight: 700; }
+  .danger { background: var(--danger); color: #fff; }
+  .ghost { background: transparent; color: var(--muted); }
+  .block { width: 100%; }
+  .card { background: var(--card); border-radius: var(--radius); padding: 14px; margin-bottom: 14px; }
+  .card h2 { margin: 0 0 10px; font-size: 18px; display: flex; gap: 8px; align-items: baseline; }
+  .card h2 .ord { color: var(--muted); font-weight: 400; }
+  .muted { color: var(--muted); }
+  .sets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .set {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--card2);
+    border-radius: 999px; padding: 6px 6px 6px 12px; font-size: 15px;
+  }
+  .set b { font-size: 17px; }
+  .set button { min-height: 32px; height: 32px; width: 32px; padding: 0; border-radius: 50%;
+    background: transparent; color: var(--muted); font-size: 18px; }
+  .add-row { display: flex; gap: 8px; align-items: stretch; }
+  .stepper { display: flex; flex: 1; background: var(--card2); border-radius: var(--radius); overflow: hidden; }
+  .stepper button { width: 52px; background: transparent; font-size: 24px; border-radius: 0; padding: 0; }
+  .stepper input {
+    flex: 1; min-width: 0; text-align: center; font: inherit; font-size: 22px; font-weight: 700;
+    background: transparent; border: 0; color: var(--text); outline: none;
+  }
+  .add-row .primary { flex: 0 0 auto; }
+  .list-item { display: flex; align-items: center; gap: 10px; }
+  .list-item .info { flex: 1; min-width: 0; }
+  .list-item .info div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bottom-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg);
+    border-top: 1px solid var(--card2); display: flex; gap: 10px;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+  .bottom-bar button { flex: 1; }
+  .empty { text-align: center; padding: 40px 10px; }
+  .toast {
+    position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    background: #000; color: #fff; padding: 10px 16px; border-radius: 999px; font-size: 15px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; max-width: 90%;
+  }
+  .toast.show { opacity: 1; }
+  .hidden { display: none !important; }
+  input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; }
+</style>
+</head>
+<body>
+
+<header>
+  <button id="backBtn" class="ghost hidden" aria-label="Wstecz">&larr;</button>
+  <h1 id="title">Treningi</h1>
+</header>
+
+<main id="main"></main>
+
+<div class="bottom-bar" id="bottomBar"></div>
+
+<input type="file" id="fileInput" accept=".json,application/json" class="hidden">
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const STORAGE_KEY = 'trening.v1';
+  const main = document.getElementById('main');
+  const bottomBar = document.getElementById('bottomBar');
+  const titleEl = document.getElementById('title');
+  const backBtn = document.getElementById('backBtn');
+  const fileInput = document.getElementById('fileInput');
+  const toastEl = document.getElementById('toast');
+
+  // state: { trainings: [{ id, createdAt, exercises: [{ name, sets: [number] }] }], currentId }
+  let state = load();
+
+  function load() {
+    try {
+      const s = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (s && Array.isArray(s.trainings)) return s;
+    } catch (e) {}
+    return { trainings: [], currentId: null };
+  }
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function formatDate(iso) {
+    const d = new Date(iso);
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`;
+  }
+
+  function formatTime(iso) {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => toastEl.classList.remove('show'), 2000);
+  }
+
+  function el(tag, attrs = {}, ...children) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+      else if (k === 'class') e.className = v;
+      else e.setAttribute(k, v);
+    }
+    for (const c of children) {
+      if (c == null) continue;
+      e.append(c instanceof Node ? c : document.createTextNode(c));
+    }
+    return e;
+  }
+
+  function current() {
+    return state.trainings.find(t => t.id === state.currentId) || null;
+  }
+
+  // ---------- Wczytywanie pliku z ćwiczeniami ----------
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    try {
+      const text = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+        r.readAsText(file);
+      });
+      const data = JSON.parse(text);
+      if (!Array.isArray(data) || data.length === 0 || !data.every(x => typeof x === 'string' && x.trim())) {
+        throw new Error('Plik musi zawierać niepustą tablicę nazw, np. ["Przysiad", "Pompki"]');
+      }
+      const training = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        createdAt: new Date().toISOString(),
+        exercises: data.map(name => ({ name: name.trim(), sets: [] }))
+      };
+      state.trainings.unshift(training);
+      state.currentId = training.id;
+      save();
+      renderTraining();
+      toast(`Wczytano ${data.length} ćwiczeń`);
+    } catch (e) {
+      alert('Błąd wczytywania pliku:\n' + (e && e.message || e));
+    }
+  });
+
+  function newTraining() {
+    fileInput.click();
+  }
+
+  // ---------- Eksport ----------
+  function exportTraining(t) {
+    const out = {
+      date: formatDate(t.createdAt),
+      exercises: t.exercises.map((ex, i) => ({
+        order: i + 1,
+        name: ex.name,
+        metrics: ex.sets.map((rep, j) => ({ set: j + 1, rep }))
+      }))
+    };
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: `trening-${out.date.replace(/\./g, '-')}.json` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---------- Widok: lista treningów ----------
+  function renderHome() {
+    state.currentId = null;
+    save();
+    titleEl.textContent = 'Treningi';
+    backBtn.classList.add('hidden');
+    main.innerHTML = '';
+
+    if (state.trainings.length === 0) {
+      main.append(el('div', { class: 'empty' },
+        el('p', {}, 'Brak treningów.'),
+        el('p', { class: 'muted' }, 'Kliknij „Nowy trening” i wybierz plik JSON z listą ćwiczeń, np. ["Przysiad", "Pompki"].')
+      ));
+    }
+
+    for (const t of state.trainings) {
+      const totalSets = t.exercises.reduce((s, ex) => s + ex.sets.length, 0);
+      const done = t.exercises.filter(ex => ex.sets.length).length;
+      main.append(el('div', { class: 'card list-item' },
+        el('div', { class: 'info', onclick: () => { state.currentId = t.id; save(); renderTraining(); } },
+          el('div', {}, el('b', {}, formatDate(t.createdAt)), ' ', el('span', { class: 'muted' }, formatTime(t.createdAt))),
+          el('div', { class: 'muted' }, `${done}/${t.exercises.length} ćwiczeń · ${totalSets} serii`)
+        ),
+        el('button', { onclick: () => exportTraining(t), 'aria-label': 'Eksportuj' }, '⬇'),
+        el('button', { class: 'ghost', 'aria-label': 'Usuń', onclick: () => {
+          if (!confirm(`Usunąć trening z ${formatDate(t.createdAt)}?`)) return;
+          state.trainings = state.trainings.filter(x => x.id !== t.id);
+          save();
+          renderHome();
+        } }, '🗑')
+      ));
+    }
+
+    bottomBar.innerHTML = '';
+    bottomBar.append(el('button', { class: 'primary', onclick: newTraining }, '+ Nowy trening'));
+  }
+
+  // ---------- Widok: trening ----------
+  function renderTraining() {
+    const t = current();
+    if (!t) return renderHome();
+    titleEl.textContent = `Trening ${formatDate(t.createdAt)}`;
+    backBtn.classList.remove('hidden');
+    main.innerHTML = '';
+
+    t.exercises.forEach((ex, i) => main.append(exerciseCard(t, ex, i)));
+
+    bottomBar.innerHTML = '';
+    bottomBar.append(
+      el('button', { onclick: () => exportTraining(t) }, '⬇ Eksportuj'),
+      el('button', { class: 'primary', onclick: newTraining }, '+ Nowy trening')
+    );
+  }
+
+  function exerciseCard(t, ex, i) {
+    const card = el('div', { class: 'card' });
+    const setsBox = el('div', { class: 'sets' });
+    const lastVal = ex.sets.length ? ex.sets[ex.sets.length - 1] : '';
+    const input = el('input', { type: 'number', inputmode: 'decimal', min: '0', step: 'any', placeholder: 'powt.', value: lastVal });
+
+    function drawSets() {
+      setsBox.innerHTML = '';
+      if (!ex.sets.length) setsBox.append(el('span', { class: 'muted' }, 'Brak serii'));
+      ex.sets.forEach((rep, j) => {
+        setsBox.append(el('span', { class: 'set' },
+          `S${j + 1}: `, el('b', {}, String(rep)),
+          el('button', { 'aria-label': 'Usuń serię', onclick: () => {
+            if (!confirm(`Usunąć serię ${j + 1} (${rep}) z „${ex.name}”?`)) return;
+            ex.sets.splice(j, 1);
+            save();
+            drawSets();
+          } }, '×')
+        ));
+      });
+    }
+
+    function step(d) {
+      const v = parseFloat(input.value) || 0;
+      input.value = Math.max(0, v + d);
+    }
+
+    function addSet() {
+      const v = parseFloat(String(input.value).replace(',', '.'));
+      if (!isFinite(v) || v <= 0) { toast('Podaj liczbę powtórzeń'); input.focus(); return; }
+      ex.sets.push(v);
+      save();
+      drawSets();
+      toast(`${ex.name}: seria ${ex.sets.length} = ${v}`);
+    }
+
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { input.blur(); addSet(); } });
+
+    card.append(
+      el('h2', {}, el('span', { class: 'ord' }, `${i + 1}.`), ex.name),
+      setsBox,
+      el('div', { class: 'add-row' },
+        el('div', { class: 'stepper' },
+          el('button', { onclick: () => step(-1), 'aria-label': 'Mniej' }, '−'),
+          input,
+          el('button', { onclick: () => step(1), 'aria-label': 'Więcej' }, '+')
+        ),
+        el('button', { class: 'primary', onclick: addSet }, '+ Seria')
+      )
+    );
+    drawSets();
+    return card;
+  }
+
+  backBtn.addEventListener('click', renderHome);
+
+  if (current()) renderTraining(); else renderHome();
+})();
+</script>
+</body>
+</html>
